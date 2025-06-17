@@ -1,0 +1,8 @@
+pandas
+numpy
+jupyterlab
+langchain
+sentence-transformers
+openai
+faiss-cpu
+python-dotenv

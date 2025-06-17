@@ -1,0 +1,17 @@
+# Virtualenv
+venv/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# dotenv
+.env
+
+# FAISS indices
+*.faiss
+
+# Python caches
+__pycache__/
