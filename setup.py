@@ -8,12 +8,7 @@ setup(
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     install_requires=[
-        "pandas",
-        "numpy",
-        "langchain",
-        "sentence-transformers",
-        "openai",
-        "faiss-cpu",
-        "python-dotenv",
+        "pandas","numpy","langchain","sentence-transformers",
+        "openai","faiss-cpu","python-dotenv",
     ],
 )

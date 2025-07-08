@@ -1,8 +1,17 @@
 pandas
 numpy
 jupyterlab
+matplotlib
 langchain
+langchain-community
 sentence-transformers
 openai
 faiss-cpu
 python-dotenv
+langchain-huggingface
+tiktoken
+
+
+
+
+

@@ -5,8 +5,9 @@ __pycache__/
 # Virtual env
 venv/
 
-# Jupyter checkpoints
+# Jupyter checkpoints & notebooks
 .ipynb_checkpoints/
+*.ipynb
 
 # FAISS indexes
 *.faiss
@@ -14,4 +15,17 @@ venv/
 # Editor/project files
 .vscode/
 .DS_Store
+
+# Env files
+.env
+
+# Nomic cache
+.nomic/
+
+# Data files (all CSVs)
+*.csv
+
+# Other generated artifacts
+.virtual_documents/
+src/ai_agents.egg-info/
 
