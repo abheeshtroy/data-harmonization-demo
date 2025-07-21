@@ -1,85 +1,77 @@
 # src/ai_agents/experiments/embed_benchmark.py
 
-import numpy as np
 import pandas as pd
-from ai_agents.tools.etl import get_ground_truth
-from ai_agents.tools.embeddings import get_embeddings
-from ai_agents.tools.vector_db import build_index, search_index
+from ai_agents.tools.etl        import load_and_clean_all
+from ai_agents.tools.prep_tool import prepare
+from ai_agents.tools.embeddings import ENGINES, get_embeddings
+from ai_agents.tools.vector_db  import build_index, search_index
+from ai_agents.experiments.top5_accuracy import compute_mrr, compute_top5_accuracy
+from ai_agents.tools.fuzzy_rerank    import rerank_by_name
 
-# Define embedding engines and field combinations to test
-EMBED_ENGINES = ["hf", "ollama"]
-FIELD_COMBOS = ["name", "address", "name_address"]
+def run_benchmark(engine: str, combo: str):
+    # 1) load & clean
+    crm, ecom = load_and_clean_all()
+    ecom_names = ecom["name"].tolist()
 
+    # 2) embed
+    if combo != "weighted":
+        texts_crm, texts_ecom = prepare(crm, ecom, combo)
+        embs_crm = get_embeddings(texts_crm.tolist(),  engine=engine)
+        embs_ecom = get_embeddings(texts_ecom.tolist(), engine=engine)
 
-def prepare_texts(df: pd.DataFrame, combo: str):
-    """
-    Given the ground-truth DataFrame (with suffixes _crm and _ecom),
-    return two lists of strings for CRM and E-com based on combo.
-    """
-    if combo == "name":
-        texts1 = df["name_crm"].astype(str)
-        texts2 = df["name_ecom"].astype(str)
-    elif combo == "address":
-        texts1 = df["address_crm"].astype(str)
-        texts2 = df["address_ecom"].astype(str)
-    elif combo == "name_address":
-        texts1 = (df["name_crm"].astype(str) + "; " + df["address_crm"].astype(str))
-        texts2 = (df["name_ecom"].astype(str) + "; " + df["address_ecom"].astype(str))
     else:
-        raise ValueError(f"Unknown combo: {combo}")
+        # weighted combo: 30% name, 30% email, 20% phone, 20% address
+        w = {"name": .3, "email": .3, "phone": .2, "address": .2}
+        # get each field’s texts
+        name_crm,  name_ecom  = prepare(crm,  ecom,  "name")
+        email_crm, email_ecom = prepare(crm,  ecom,  "email")
+        phone_crm, phone_ecom = prepare(crm,  ecom,  "phone")
+        addr_crm,  addr_ecom  = prepare(crm,  ecom,  "address")
+        # embed each separately
+        emb_name_crm  = get_embeddings(name_crm.tolist(),  engine=engine)
+        emb_name_ecom = get_embeddings(name_ecom.tolist(),  engine=engine)
+        emb_email_crm  = get_embeddings(email_crm.tolist(), engine=engine)
+        emb_email_ecom = get_embeddings(email_ecom.tolist(), engine=engine)
+        emb_phone_crm  = get_embeddings(phone_crm.tolist(), engine=engine)
+        emb_phone_ecom = get_embeddings(phone_ecom.tolist(), engine=engine)
+        emb_addr_crm   = get_embeddings(addr_crm.tolist(),   engine=engine)
+        emb_addr_ecom  = get_embeddings(addr_ecom.tolist(),   engine=engine)
+        # weighted sum
+        embs_crm = (
+            w["name"]*emb_name_crm  +
+            w["email"]*emb_email_crm+
+            w["phone"]*emb_phone_crm+
+            w["address"]*emb_addr_crm
+        )
+        embs_ecom = (
+            w["name"]*emb_name_ecom  +
+            w["email"]*emb_email_ecom+
+            w["phone"]*emb_phone_ecom+
+            w["address"]*emb_addr_ecom
+        )
 
-    # Basic text normalization: lowercase and strip
-    texts1 = texts1.str.lower().str.strip().tolist()
-    texts2 = texts2.str.lower().str.strip().tolist()
-    return texts1, texts2
+    # 3) build FAISS index
+    index = build_index(embs_ecom)
 
+    # 4) for each CRM embedding: retrieve top-5, fuzzy re-rank, record rank
+    ranks = []
+    for i, emb in enumerate(embs_crm):
+        _, idxs = search_index(index, emb, k=5)
+        # fuzzy re-rank those 5 by name similarity
+        crm_name = crm.loc[i, "name"]
+        reranked = rerank_by_name(crm_name, ecom_names, idxs.tolist())
+        # compute final 1-based rank
+        rank = reranked.index(i) + 1 if i in reranked else 6
+        ranks.append(rank)
 
-def compute_mrr(texts1, texts2, engine: str) -> float:
-    """
-    Compute Mean Reciprocal Rank for a given engine on the two lists.
-    """
-    # 1) Embed lists
-    embs1 = get_embeddings(texts1, engine=engine)
-    embs2 = get_embeddings(texts2, engine=engine)
-
-    # 2) Build FAISS index on E-com embeddings
-    index = build_index(embs2)
-
-    # 3) For each CRM embedding, query and compute reciprocal rank
-    rr_total = 0.0
-    for i, emb in enumerate(embs1):
-        dists, idxs = search_index(index, emb, k=len(embs2))
-        # find where ground-truth partner (same row index) appears
-        ranks = np.where(idxs == i)[0]
-        if ranks.size > 0:
-            rr_total += 1.0 / (ranks[0] + 1)
-        # else: contributes 0
-    return rr_total / len(embs1)
-
-
-def main():
-    # 1) Get a small ground-truth set (first 20 matches)
-    df_gt = get_ground_truth(n=20)
-
-    results = []
-    # 2) Loop engines and field combos
-    for engine in EMBED_ENGINES:
-        for combo in FIELD_COMBOS:
-            texts1, texts2 = prepare_texts(df_gt, combo)
-            mrr = compute_mrr(texts1, texts2, engine)
-            results.append({
-                "engine": engine,
-                "field_combo": combo,
-                "MRR": round(mrr, 3)
-            })
-            print(f"Engine={engine:<7} Combo={combo:<12} MRR={mrr:.3f}")
-
-    # 3) Tabulate and save
-    df_res = pd.DataFrame(results)
-    print("\nSummary:")
-    print(df_res)
-    df_res.to_csv("data/embed_benchmark_results.csv", index=False)
-
+    # 5) compute metrics
+    mrr  = compute_mrr(ranks)
+    top5 = compute_top5_accuracy(ranks)
+    print(f"{engine:>6} | {combo:<8} | MRR={mrr:.3f} | Top-5={top5:.3f}")
 
 if __name__ == "__main__":
-    main()
+    COMBOS  = ["all", "name", "email", "phone", "address", "weighted"]
+
+    for engine in ENGINES:
+        for combo in COMBOS:
+            run_benchmark(engine, combo)
