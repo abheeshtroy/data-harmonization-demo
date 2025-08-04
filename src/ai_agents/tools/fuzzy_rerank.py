@@ -1,16 +1,22 @@
 # src/ai_agents/tools/fuzzy_rerank.py
+
 from rapidfuzz import fuzz
 
-def rerank_by_name(crm_names, ecom_names, candidate_idxs):
+def rerank_by_name(
+    crm_name: str,
+    ecom_df,          # pandas.DataFrame with a 'name' column
+    idxs: list[int]
+) -> list[int]:
     """
-    Given a CRM name string and list of ecom name strings at candidate_idxs,
-    compute fuzzy similarity and return the candidate index with max score.
-    Returns the re-ranked list of indices sorted by descending score.
+    Given a single CRM name, the full E‐com DataFrame, and a list of candidate indices,
+    compute rapidfuzz.token_sort_ratio for each, sort descending, and return
+    the sorted list of indices.
     """
-    scores = []
-    for idx in candidate_idxs:
-        score = fuzz.token_sort_ratio(crm_names, ecom_names[idx]) / 100.0
-        scores.append((idx, score))
-    # Sort by score descending
-    scores.sort(key=lambda x: x[1], reverse=True)
-    return [idx for idx, _ in scores]
+    # compute (idx, score) pairs
+    scored = [
+        (idx, fuzz.token_sort_ratio(crm_name, ecom_df.loc[idx, "name"]))
+        for idx in idxs
+    ]
+    # sort by score descending
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [idx for idx, _ in scored]
